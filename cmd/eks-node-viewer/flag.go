@@ -41,14 +41,15 @@ func init() {
 }
 
 type Flags struct {
-	Context         string
-	NodeSelector    string
-	ExtraLabels     string
-	Kubeconfig      string
-	Resources       string
-	DisablePricing  bool
-	ShowAttribution bool
-	Version         bool
+	Context          string
+	NodeSelector     string
+	ExtraLabels      string
+	Kubeconfig       string
+	Resources        string
+	DisablePricing   bool
+	ShowAttribution  bool
+	RunMetricsServer bool
+	Version          bool
 }
 
 func ParseFlags() (Flags, error) {
@@ -81,6 +82,9 @@ func ParseFlags() (Flags, error) {
 
 	disablePricingDefault := cfg.getBoolValue("disable-pricing", false)
 	flagSet.BoolVar(&flags.DisablePricing, "disable-pricing", disablePricingDefault, "Disable pricing lookups")
+
+	runMetricsServer := cfg.getBoolValue("run-metrics-server", false)
+	flagSet.BoolVar(&flags.RunMetricsServer, "run-metrics-server", runMetricsServer, "Run as metrics server")
 
 	flagSet.BoolVar(&flags.ShowAttribution, "attribution", false, "Show the Open Source Attribution")
 

@@ -20,14 +20,21 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws/defaults"
-	"github.com/aws/aws-sdk-go/aws/session"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/aws/aws-sdk-go/aws/session"
 	v1 "k8s.io/api/core/v1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -69,7 +76,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("creating client, %s", err)
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		cancel()
+	}()
 
 	defaults.SharedCredentialsFilename()
 	pprov := pricing.NewStaticProvider()
@@ -99,11 +115,20 @@ func main() {
 		nodeSelector: nodeSelector,
 		pricing:      pprov,
 	}
-	startMonitor(ctx, monitorSettings)
-	if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
-		log.Fatalf("error running tea: %s", err)
+
+	if err := prometheus.Register(m.Cluster()); err != nil {
+		log.Fatal(fmt.Errorf("could not register prometheus collector: %w", err))
 	}
-	cancel()
+
+	startMonitor(ctx, monitorSettings)
+
+	if flags.RunMetricsServer {
+		startMetrics(ctx)
+	} else {
+		if _, err := tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
+			log.Fatalf("error running tea: %s", err)
+		}
+	}
 }
 
 type monitorSettings struct {
@@ -205,4 +230,29 @@ func isTerminalPod(p *v1.Pod) bool {
 		return true
 	}
 	return false
+}
+
+func startMetrics(ctx context.Context) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+
+	srv := &http.Server{
+		Addr:    ":8000",
+		Handler: mux,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(fmt.Errorf("error listening: %w", err))
+		}
+	}()
+
+	<-ctx.Done()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("could not shutdown HTTP server: %w", err)
+	}
 }

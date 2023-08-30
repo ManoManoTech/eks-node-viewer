@@ -18,6 +18,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -126,7 +127,7 @@ func (c *Cluster) Stats() Stats {
 	st := Stats{
 		AllocatableResources: v1.ResourceList{},
 		UsedResources:        v1.ResourceList{},
-		PercentUsedResoruces: map[v1.ResourceName]float64{},
+		PercentUsedResources: map[v1.ResourceName]float64{},
 		PodsByPhase:          map[v1.PodPhase]int{},
 	}
 
@@ -167,6 +168,21 @@ func (c *Cluster) Stats() Stats {
 		return st.Nodes[a].Created().Before(st.Nodes[b].Created())
 	})
 	return st
+}
+
+func (c *Cluster) Describe(ch chan<- *prometheus.Desc) {
+	prometheus.DescribeByCollect(c, ch)
+}
+
+func (c *Cluster) Collect(ch chan<- prometheus.Metric) {
+	stats := c.Stats()
+	ch <- prometheus.MustNewConstMetric(
+		prometheus.NewDesc(
+			"eks_cluster_price_dollars",
+			"Hourly cluster price", nil, nil),
+		prometheus.GaugeValue,
+		stats.TotalPrice,
+	)
 }
 
 // addResources sets lhs = lhs + rhs
